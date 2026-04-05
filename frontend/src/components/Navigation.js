@@ -35,15 +35,12 @@ const Navigation = () => {
       <div className="max-w-7xl mx-auto px-6 md:px-12">
         <div className="flex items-center justify-between h-16">
           <Link to="/dashboard" className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center"
-              style={{ backgroundColor: '#D4AF37' }}
-            >
-              <span className="text-[#0A0908] font-bold text-lg">RA</span>
-            </div>
-            <span className="text-white font-bold text-lg" style={{ fontFamily: 'Outfit, sans-serif' }}>
-              Reclaim Africa
-            </span>
+            <img 
+              src="/reclaim-africa-logo.jpg" 
+              alt="Reclaim Africa" 
+              className="h-12 w-auto"
+              style={{ objectFit: 'contain' }}
+            />
           </Link>
 
           <div className="flex items-center gap-6">

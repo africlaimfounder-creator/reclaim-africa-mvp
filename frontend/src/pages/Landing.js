@@ -25,24 +25,14 @@ const Landing = () => {
       />
 
       <div className="relative z-20 max-w-4xl mx-auto px-6 text-left">
-        <div className="mb-8 flex items-center gap-4">
-          <div
-            className="w-16 h-16 rounded-full flex items-center justify-center"
-            style={{ backgroundColor: '#D4AF37' }}
-          >
-            <span className="text-[#0A0908] font-bold text-2xl" style={{ fontFamily: 'Outfit, sans-serif' }}>
-              RA
-            </span>
-          </div>
+        <div className="mb-8 flex justify-start">
+          <img 
+            src="/reclaim-africa-logo.jpg" 
+            alt="Reclaim Africa" 
+            className="h-32 w-auto"
+            style={{ objectFit: 'contain' }}
+          />
         </div>
-
-        <h1
-          className="text-5xl sm:text-6xl lg:text-7xl font-bold text-white mb-6 leading-tight"
-          style={{ fontFamily: 'Outfit, sans-serif' }}
-          data-testid="landing-title"
-        >
-          Reclaim Africa
-        </h1>
 
         <p
           className="text-xl sm:text-2xl mb-4"

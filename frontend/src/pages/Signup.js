@@ -41,14 +41,12 @@ const Signup = () => {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
-            <div
-              className="w-16 h-16 rounded-full flex items-center justify-center"
-              style={{ backgroundColor: '#D4AF37' }}
-            >
-              <span className="text-[#0A0908] font-bold text-2xl" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                RA
-              </span>
-            </div>
+            <img 
+              src="/reclaim-africa-logo.jpg" 
+              alt="Reclaim Africa" 
+              className="h-20 w-auto"
+              style={{ objectFit: 'contain' }}
+            />
           </div>
           <h1
             className="text-3xl font-bold text-white mb-2"
