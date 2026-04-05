@@ -163,8 +163,11 @@ async def create_notification(user_id: str, title: str, message: str, notificati
     await db.notifications.insert_one(notification)
     logger.info(f'Notification created for user {user_id}: {title}')
     
-    # Also send push notification
-    await send_push_notification(user_id, title, message)
+    # Also send push notification (non-blocking)
+    try:
+        await send_push_notification(user_id, title, message)
+    except Exception as e:
+        logger.error(f'Failed to send push notification: {str(e)}')
 
 # ============ VAPID KEYS ============
 
@@ -204,33 +207,40 @@ VAPID_CLAIMS = {
 
 async def send_push_notification(user_id: str, title: str, message: str, url: str = '/notifications'):
     """Send push notification to a user"""
-    # Get all push subscriptions for this user
-    subscriptions = await db.push_subscriptions.find({'user_id': user_id}).to_list(100)
-    
-    for sub in subscriptions:
-        try:
-            webpush(
-                subscription_info={
-                    'endpoint': sub['endpoint'],
-                    'keys': sub['keys']
-                },
-                data=json.dumps({
-                    'title': title,
-                    'message': message,
-                    'url': url
-                }),
-                vapid_private_key=VAPID_PRIVATE_KEY,
-                vapid_claims=VAPID_CLAIMS
-            )
-            logger.info(f'Push notification sent to user {user_id}')
-        except WebPushException as e:
-            logger.error(f'Push notification failed: {str(e)}')
-            # Remove invalid subscription
-            if e.response and e.response.status_code in [404, 410]:
-                await db.push_subscriptions.delete_one({'_id': sub['_id']})
-                logger.info(f'Removed invalid push subscription for user {user_id}')
-        except Exception as e:
-            logger.error(f'Unexpected error sending push: {str(e)}')
+    try:
+        # Get all push subscriptions for this user
+        subscriptions = await db.push_subscriptions.find({'user_id': user_id}).to_list(100)
+        
+        if not subscriptions:
+            logger.info(f'No push subscriptions found for user {user_id}')
+            return
+        
+        for sub in subscriptions:
+            try:
+                webpush(
+                    subscription_info={
+                        'endpoint': sub['endpoint'],
+                        'keys': sub['keys']
+                    },
+                    data=json.dumps({
+                        'title': title,
+                        'message': message,
+                        'url': url
+                    }),
+                    vapid_private_key=VAPID_PRIVATE_KEY,
+                    vapid_claims=VAPID_CLAIMS
+                )
+                logger.info(f'Push notification sent to user {user_id}')
+            except WebPushException as e:
+                logger.error(f'Push notification failed: {str(e)}')
+                # Remove invalid subscription
+                if e.response and e.response.status_code in [404, 410]:
+                    await db.push_subscriptions.delete_one({'_id': sub['_id']})
+                    logger.info(f'Removed invalid push subscription for user {user_id}')
+            except Exception as e:
+                logger.error(f'Unexpected error sending push: {str(e)}')
+    except Exception as e:
+        logger.error(f'Error in send_push_notification: {str(e)}')
 
 # ============ STARTUP ============
 
