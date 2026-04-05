@@ -1,15 +1,19 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from bson import ObjectId
 import os
 import logging
+import secrets
+import asyncio
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
-
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timezone, timedelta
+import bcrypt
+import jwt
+import resend
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -19,71 +23,495 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
+# Resend setup
+resend.api_key = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+
+# JWT configuration
+JWT_SECRET = os.environ['JWT_SECRET']
+JWT_ALGORITHM = 'HS256'
+
+# Create the main app
 app = FastAPI()
+api_router = APIRouter(prefix='/api')
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
+# ============ MODELS ============
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
+class UserRegister(BaseModel):
+    full_name: str
+    email: EmailStr
+    phone: str
+    password: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    phone: str
+    role: str
+
+class ClaimCreate(BaseModel):
+    asset_type: str
+    claiming_for: str
+    documents: List[str]
+    full_name: str
+    phone: str
+    email: EmailStr
+    state: str
+    company_name: str
+    estimated_shares: Optional[str] = None
+    estimated_value: Optional[str] = None
+    service_tier: str
+
+class ClaimResponse(BaseModel):
+    id: str
+    user_id: str
+    asset_type: str
+    claiming_for: str
+    documents: List[str]
+    full_name: str
+    phone: str
+    email: str
+    state: str
+    company_name: str
+    estimated_shares: Optional[str]
+    estimated_value: Optional[str]
+    service_tier: str
+    status: str
+    created_at: str
+    updated_at: str
+
+class ClaimStatusUpdate(BaseModel):
+    status: str
+
+# ============ HELPER FUNCTIONS ============
+
+def hash_password(password: str) -> str:
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+
+def create_access_token(user_id: str, email: str) -> str:
+    payload = {
+        'sub': user_id,
+        'email': email,
+        'exp': datetime.now(timezone.utc) + timedelta(minutes=60),
+        'type': 'access'
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def create_refresh_token(user_id: str) -> str:
+    payload = {
+        'sub': user_id,
+        'exp': datetime.now(timezone.utc) + timedelta(days=7),
+        'type': 'refresh'
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get('access_token')
+    if not token:
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if payload.get('type') != 'access':
+            raise HTTPException(status_code=401, detail='Invalid token type')
+        user = await db.users.find_one({'_id': ObjectId(payload['sub'])})
+        if not user:
+            raise HTTPException(status_code=401, detail='User not found')
+        user['_id'] = str(user['_id'])
+        user.pop('password_hash', None)
+        return user
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail='Token expired')
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail='Invalid token')
+
+async def send_email(recipient: str, subject: str, html_content: str):
+    params = {
+        'from': SENDER_EMAIL,
+        'to': [recipient],
+        'subject': subject,
+        'html': html_content
+    }
+    try:
+        email = await asyncio.to_thread(resend.Emails.send, params)
+        logger.info(f'Email sent to {recipient}: {email.get("id")}')
+        return email
+    except Exception as e:
+        logger.error(f'Failed to send email to {recipient}: {str(e)}')
+        return None
+
+# ============ STARTUP ============
+
+@app.on_event('startup')
+async def startup():
+    await db.users.create_index('email', unique=True)
+    await db.claims.create_index('user_id')
+    await seed_admin()
+
+async def seed_admin():
+    admin_email = os.environ.get('ADMIN_EMAIL', 'admin@example.com')
+    admin_password = os.environ.get('ADMIN_PASSWORD', 'admin123')
+    existing = await db.users.find_one({'email': admin_email})
+    if existing is None:
+        hashed = hash_password(admin_password)
+        await db.users.insert_one({
+            'email': admin_email,
+            'password_hash': hashed,
+            'full_name': 'Admin',
+            'phone': '',
+            'role': 'admin',
+            'created_at': datetime.now(timezone.utc)
+        })
+        logger.info(f'Admin user created: {admin_email}')
+    elif not verify_password(admin_password, existing['password_hash']):
+        await db.users.update_one(
+            {'email': admin_email},
+            {'$set': {'password_hash': hash_password(admin_password)}}
+        )
+        logger.info(f'Admin password updated for: {admin_email}')
     
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # Write test credentials
+    Path('/app/memory').mkdir(exist_ok=True)
+    with open('/app/memory/test_credentials.md', 'w') as f:
+        f.write('# Test Credentials\n\n')
+        f.write('## Admin\n')
+        f.write(f'- Email: {admin_email}\n')
+        f.write(f'- Password: {admin_password}\n')
+        f.write('- Role: admin\n\n')
+        f.write('## Endpoints\n')
+        f.write('- POST /api/auth/register\n')
+        f.write('- POST /api/auth/login\n')
+        f.write('- GET /api/auth/me\n')
+        f.write('- POST /api/auth/logout\n')
+        f.write('- POST /api/claims\n')
+        f.write('- GET /api/claims\n')
+        f.write('- GET /api/admin/claims\n')
+        f.write('- PATCH /api/admin/claims/{claim_id}/status\n')
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+# ============ AUTH ROUTES ============
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
-
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
+@api_router.post('/auth/register')
+async def register(user: UserRegister, response: Response):
+    email_lower = user.email.lower()
+    existing = await db.users.find_one({'email': email_lower})
+    if existing:
+        raise HTTPException(status_code=400, detail='Email already registered')
     
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
+    password_hash = hash_password(user.password)
+    user_doc = {
+        'email': email_lower,
+        'password_hash': password_hash,
+        'full_name': user.full_name,
+        'phone': user.phone,
+        'role': 'user',
+        'created_at': datetime.now(timezone.utc)
+    }
+    result = await db.users.insert_one(user_doc)
+    user_id = str(result.inserted_id)
     
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+    access_token = create_access_token(user_id, email_lower)
+    refresh_token = create_refresh_token(user_id)
+    
+    response.set_cookie(
+        key='access_token',
+        value=access_token,
+        httponly=True,
+        secure=False,
+        samesite='lax',
+        max_age=3600,
+        path='/'
+    )
+    response.set_cookie(
+        key='refresh_token',
+        value=refresh_token,
+        httponly=True,
+        secure=False,
+        samesite='lax',
+        max_age=604800,
+        path='/'
+    )
+    
+    # Send welcome email
+    html = f'''
+    <html>
+    <body style="font-family: sans-serif; color: #333;">
+        <h2 style="color: #D4AF37;">Welcome to Reclaim Africa</h2>
+        <p>Hi {user.full_name},</p>
+        <p>Thank you for creating an account with Reclaim Africa. We are here to help you recover what is yours.</p>
+        <p>Remember: We only get paid when you get paid.</p>
+        <p>If you have any questions, contact our founder at reclaimafrica.founder@gmail.com</p>
+        <br>
+        <p>Best regards,<br>The Reclaim Africa Team</p>
+    </body>
+    </html>
+    '''
+    await send_email(email_lower, 'Welcome to Reclaim Africa', html)
+    
+    return UserResponse(
+        id=user_id,
+        email=email_lower,
+        full_name=user.full_name,
+        phone=user.phone,
+        role='user'
+    )
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
+@api_router.post('/auth/login')
+async def login(credentials: UserLogin, response: Response):
+    email_lower = credentials.email.lower()
+    user = await db.users.find_one({'email': email_lower})
+    if not user or not verify_password(credentials.password, user['password_hash']):
+        raise HTTPException(status_code=401, detail='Invalid email or password')
     
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
+    user_id = str(user['_id'])
+    access_token = create_access_token(user_id, email_lower)
+    refresh_token = create_refresh_token(user_id)
     
-    return status_checks
+    response.set_cookie(
+        key='access_token',
+        value=access_token,
+        httponly=True,
+        secure=False,
+        samesite='lax',
+        max_age=3600,
+        path='/'
+    )
+    response.set_cookie(
+        key='refresh_token',
+        value=refresh_token,
+        httponly=True,
+        secure=False,
+        samesite='lax',
+        max_age=604800,
+        path='/'
+    )
+    
+    return UserResponse(
+        id=user_id,
+        email=email_lower,
+        full_name=user.get('full_name', ''),
+        phone=user.get('phone', ''),
+        role=user.get('role', 'user')
+    )
 
-# Include the router in the main app
+@api_router.get('/auth/me')
+async def get_me(request: Request):
+    user = await get_current_user(request)
+    return UserResponse(
+        id=user['_id'],
+        email=user['email'],
+        full_name=user.get('full_name', ''),
+        phone=user.get('phone', ''),
+        role=user.get('role', 'user')
+    )
+
+@api_router.post('/auth/logout')
+async def logout(response: Response):
+    response.delete_cookie(key='access_token', path='/')
+    response.delete_cookie(key='refresh_token', path='/')
+    return {'message': 'Logged out successfully'}
+
+# ============ CLAIMS ROUTES ============
+
+@api_router.post('/claims')
+async def create_claim(claim: ClaimCreate, request: Request):
+    user = await get_current_user(request)
+    
+    claim_doc = {
+        'user_id': user['_id'],
+        'asset_type': claim.asset_type,
+        'claiming_for': claim.claiming_for,
+        'documents': claim.documents,
+        'full_name': claim.full_name,
+        'phone': claim.phone,
+        'email': claim.email,
+        'state': claim.state,
+        'company_name': claim.company_name,
+        'estimated_shares': claim.estimated_shares,
+        'estimated_value': claim.estimated_value,
+        'service_tier': claim.service_tier,
+        'status': 'Submitted',
+        'created_at': datetime.now(timezone.utc),
+        'updated_at': datetime.now(timezone.utc)
+    }
+    result = await db.claims.insert_one(claim_doc)
+    claim_id = str(result.inserted_id)
+    
+    # Send confirmation email
+    html = f'''
+    <html>
+    <body style="font-family: sans-serif; color: #333;">
+        <h2 style="color: #D4AF37;">Claim Submitted Successfully</h2>
+        <p>Hi {claim.full_name},</p>
+        <p>Thank you. Reclaim Africa has received your claim request.</p>
+        <p><strong>Asset Type:</strong> {claim.asset_type}</p>
+        <p><strong>Service Tier:</strong> {claim.service_tier}</p>
+        <p>Our team will review your case and contact you within 48 hours.</p>
+        <p>There is no upfront cost. We only get paid when you get paid.</p>
+        <p>Welcome to Reclaim Africa.</p>
+        <br>
+        <p>Best regards,<br>The Reclaim Africa Team</p>
+    </body>
+    </html>
+    '''
+    await send_email(claim.email, 'Your Claim Has Been Submitted', html)
+    
+    return ClaimResponse(
+        id=claim_id,
+        user_id=user['_id'],
+        asset_type=claim.asset_type,
+        claiming_for=claim.claiming_for,
+        documents=claim.documents,
+        full_name=claim.full_name,
+        phone=claim.phone,
+        email=claim.email,
+        state=claim.state,
+        company_name=claim.company_name,
+        estimated_shares=claim.estimated_shares,
+        estimated_value=claim.estimated_value,
+        service_tier=claim.service_tier,
+        status='Submitted',
+        created_at=claim_doc['created_at'].isoformat(),
+        updated_at=claim_doc['updated_at'].isoformat()
+    )
+
+@api_router.get('/claims')
+async def get_user_claims(request: Request):
+    user = await get_current_user(request)
+    claims = await db.claims.find({'user_id': user['_id']}, {'_id': 0}).to_list(1000)
+    for claim in claims:
+        if isinstance(claim.get('created_at'), datetime):
+            claim['created_at'] = claim['created_at'].isoformat()
+        if isinstance(claim.get('updated_at'), datetime):
+            claim['updated_at'] = claim['updated_at'].isoformat()
+    return claims
+
+# ============ ADMIN ROUTES ============
+
+@api_router.get('/admin/claims')
+async def get_all_claims(request: Request):
+    user = await get_current_user(request)
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='Admin access required')
+    
+    pipeline = [
+        {
+            '$lookup': {
+                'from': 'users',
+                'localField': 'user_id',
+                'foreignField': '_id',
+                'as': 'user_info'
+            }
+        },
+        {
+            '$unwind': '$user_info'
+        },
+        {
+            '$project': {
+                '_id': 0,
+                'id': {'$toString': '$_id'},
+                'user_id': {'$toString': '$user_id'},
+                'user_email': '$user_info.email',
+                'user_full_name': '$user_info.full_name',
+                'asset_type': 1,
+                'claiming_for': 1,
+                'documents': 1,
+                'full_name': 1,
+                'phone': 1,
+                'email': 1,
+                'state': 1,
+                'company_name': 1,
+                'estimated_shares': 1,
+                'estimated_value': 1,
+                'service_tier': 1,
+                'status': 1,
+                'created_at': 1,
+                'updated_at': 1
+            }
+        },
+        {
+            '$sort': {'created_at': -1}
+        }
+    ]
+    
+    claims = await db.claims.aggregate(pipeline).to_list(1000)
+    for claim in claims:
+        if isinstance(claim.get('created_at'), datetime):
+            claim['created_at'] = claim['created_at'].isoformat()
+        if isinstance(claim.get('updated_at'), datetime):
+            claim['updated_at'] = claim['updated_at'].isoformat()
+    return claims
+
+@api_router.patch('/admin/claims/{claim_id}/status')
+async def update_claim_status(claim_id: str, update: ClaimStatusUpdate, request: Request):
+    user = await get_current_user(request)
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail='Admin access required')
+    
+    try:
+        obj_id = ObjectId(claim_id)
+    except:
+        raise HTTPException(status_code=400, detail='Invalid claim ID')
+    
+    claim = await db.claims.find_one({'_id': obj_id})
+    if not claim:
+        raise HTTPException(status_code=404, detail='Claim not found')
+    
+    await db.claims.update_one(
+        {'_id': obj_id},
+        {'$set': {'status': update.status, 'updated_at': datetime.now(timezone.utc)}}
+    )
+    
+    # Send status update email
+    html = f'''
+    <html>
+    <body style="font-family: sans-serif; color: #333;">
+        <h2 style="color: #D4AF37;">Claim Status Updated</h2>
+        <p>Hi {claim['full_name']},</p>
+        <p>Your claim for <strong>{claim['asset_type']}</strong> has been updated.</p>
+        <p><strong>New Status:</strong> {update.status}</p>
+        <p>You can log in to your dashboard to view more details.</p>
+        <p>If you have any questions, contact us at reclaimafrica.founder@gmail.com</p>
+        <br>
+        <p>Best regards,<br>The Reclaim Africa Team</p>
+    </body>
+    </html>
+    '''
+    await send_email(claim['email'], 'Claim Status Update', html)
+    
+    return {'message': 'Claim status updated successfully', 'status': update.status}
+
+# ============ MAIN APP ============
+
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[os.environ.get('FRONTEND_URL', 'http://localhost:3000')],
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
 
-@app.on_event("shutdown")
+@app.on_event('shutdown')
 async def shutdown_db_client():
     client.close()
