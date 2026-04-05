@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { Bell, Check, X } from 'lucide-react';
 
@@ -217,6 +218,23 @@ const NotificationBell = () => {
               ))
             )}
           </div>
+
+          {notifications.length > 0 && (
+            <div className="p-4 border-t" style={{ borderColor: '#2B2823' }}>
+              <Link
+                to="/notifications"
+                onClick={() => setIsOpen(false)}
+                className="block text-center py-2 rounded-lg font-medium transition-all duration-300 hover:bg-[#D4AF37] hover:text-[#0A0908]"
+                style={{
+                  color: '#D4AF37',
+                  fontFamily: 'Manrope, sans-serif'
+                }}
+                data-testid="view-all-notifications-link"
+              >
+                View All Notifications
+              </Link>
+            </div>
+          )}
         </div>
       )}
     </div>

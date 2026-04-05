@@ -10,6 +10,7 @@ import NewClaim from './pages/NewClaim';
 import Help from './pages/Help';
 import Admin from './pages/Admin';
 import MyClaims from './pages/MyClaims';
+import Notifications from './pages/Notifications';
 import './App.css';
 
 function App() {
@@ -49,6 +50,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Help />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/notifications"
+            element={
+              <ProtectedRoute>
+                <Notifications />
               </ProtectedRoute>
             }
           />

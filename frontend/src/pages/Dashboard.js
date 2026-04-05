@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Navigation from '../components/Navigation';
+import PushNotificationPrompt from '../components/PushNotificationPrompt';
 import axios from 'axios';
 import { Plus, FileText, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 
@@ -57,6 +58,7 @@ const Dashboard = () => {
   return (
     <div style={{ backgroundColor: '#0A0908', minHeight: '100vh' }}>
       <Navigation />
+      <PushNotificationPrompt />
       <div className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         <div className="mb-12">
           <h1

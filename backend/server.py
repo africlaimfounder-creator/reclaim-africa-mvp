@@ -12,6 +12,9 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
+from pywebpush import webpush, WebPushException
+import json
+from cryptography.hazmat.primitives import serialization
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -93,6 +96,10 @@ class NotificationResponse(BaseModel):
     read: bool
     created_at: str
 
+class PushSubscription(BaseModel):
+    endpoint: str
+    keys: Dict[str, str]
+
 # ============ HELPER FUNCTIONS ============
 
 def hash_password(password: str) -> str:
@@ -155,6 +162,75 @@ async def create_notification(user_id: str, title: str, message: str, notificati
     }
     await db.notifications.insert_one(notification)
     logger.info(f'Notification created for user {user_id}: {title}')
+    
+    # Also send push notification
+    await send_push_notification(user_id, title, message)
+
+# ============ VAPID KEYS ============
+
+def get_vapid_keys():
+    """Get or generate VAPID keys for push notifications"""
+    vapid_private = os.environ.get('VAPID_PRIVATE_KEY')
+    vapid_public = os.environ.get('VAPID_PUBLIC_KEY')
+    
+    if not vapid_private or not vapid_public:
+        # Generate new keys if not in environment
+        from py_vapid import Vapid
+        vapid = Vapid()
+        vapid.generate_keys()
+        vapid_private = vapid.save_key('/tmp/.vapid_key.pem')
+        
+        # Get public key as string
+        vapid_public = vapid.public_key.public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )
+        
+        # Convert to base64 URL-safe string
+        import base64
+        vapid_public = base64.urlsafe_b64encode(vapid_public).decode('utf-8').rstrip('=')
+        
+        with open('/tmp/.vapid_key.pem', 'r') as f:
+            vapid_private = f.read()
+        
+        logger.warning('VAPID keys not found in environment. Generated temporary keys.')
+    
+    return vapid_private, vapid_public
+
+VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY = get_vapid_keys()
+VAPID_CLAIMS = {
+    "sub": "mailto:reclaimafrica.founder@gmail.com"
+}
+
+async def send_push_notification(user_id: str, title: str, message: str, url: str = '/notifications'):
+    """Send push notification to a user"""
+    # Get all push subscriptions for this user
+    subscriptions = await db.push_subscriptions.find({'user_id': user_id}).to_list(100)
+    
+    for sub in subscriptions:
+        try:
+            webpush(
+                subscription_info={
+                    'endpoint': sub['endpoint'],
+                    'keys': sub['keys']
+                },
+                data=json.dumps({
+                    'title': title,
+                    'message': message,
+                    'url': url
+                }),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims=VAPID_CLAIMS
+            )
+            logger.info(f'Push notification sent to user {user_id}')
+        except WebPushException as e:
+            logger.error(f'Push notification failed: {str(e)}')
+            # Remove invalid subscription
+            if e.response and e.response.status_code in [404, 410]:
+                await db.push_subscriptions.delete_one({'_id': sub['_id']})
+                logger.info(f'Removed invalid push subscription for user {user_id}')
+        except Exception as e:
+            logger.error(f'Unexpected error sending push: {str(e)}')
 
 # ============ STARTUP ============
 
@@ -522,6 +598,49 @@ async def mark_all_notifications_read(request: Request):
         {'$set': {'read': True}}
     )
     return {'message': 'All notifications marked as read'}
+
+# ============ PUSH NOTIFICATION ROUTES ============
+
+@api_router.get('/push/vapid-public-key')
+async def get_vapid_public_key(request: Request):
+    """Get VAPID public key for push subscription"""
+    await get_current_user(request)  # Ensure user is authenticated
+    return {'publicKey': VAPID_PUBLIC_KEY}
+
+@api_router.post('/push/subscribe')
+async def subscribe_to_push(subscription: PushSubscription, request: Request):
+    """Subscribe user to push notifications"""
+    user = await get_current_user(request)
+    
+    # Check if subscription already exists
+    existing = await db.push_subscriptions.find_one({
+        'user_id': user['_id'],
+        'endpoint': subscription.endpoint
+    })
+    
+    if not existing:
+        await db.push_subscriptions.insert_one({
+            'user_id': user['_id'],
+            'endpoint': subscription.endpoint,
+            'keys': subscription.keys,
+            'created_at': datetime.now(timezone.utc)
+        })
+        logger.info(f'Push subscription added for user {user["_id"]}')
+    
+    return {'message': 'Subscribed to push notifications'}
+
+@api_router.post('/push/unsubscribe')
+async def unsubscribe_from_push(subscription: PushSubscription, request: Request):
+    """Unsubscribe user from push notifications"""
+    user = await get_current_user(request)
+    
+    await db.push_subscriptions.delete_one({
+        'user_id': user['_id'],
+        'endpoint': subscription.endpoint
+    })
+    
+    logger.info(f'Push subscription removed for user {user["_id"]}')
+    return {'message': 'Unsubscribed from push notifications'}
 
 # ============ MAIN APP ============
 
