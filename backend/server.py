@@ -6,14 +6,12 @@ from bson import ObjectId
 import os
 import logging
 import secrets
-import asyncio
 from pathlib import Path
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import bcrypt
 import jwt
-import resend
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -22,10 +20,6 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
-
-# Resend setup
-resend.api_key = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
 
 # JWT configuration
 JWT_SECRET = os.environ['JWT_SECRET']
@@ -140,21 +134,6 @@ async def get_current_user(request: Request) -> dict:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail='Invalid token')
 
-async def send_email(recipient: str, subject: str, html_content: str):
-    params = {
-        'from': SENDER_EMAIL,
-        'to': [recipient],
-        'subject': subject,
-        'html': html_content
-    }
-    try:
-        email = await asyncio.to_thread(resend.Emails.send, params)
-        logger.info(f'Email sent to {recipient}: {email.get("id")}')
-        return email
-    except Exception as e:
-        logger.error(f'Failed to send email to {recipient}: {str(e)}')
-        return None
-
 # ============ STARTUP ============
 
 @app.on_event('startup')
@@ -246,22 +225,6 @@ async def register(user: UserRegister, response: Response):
         path='/'
     )
     
-    # Send welcome email
-    html = f'''
-    <html>
-    <body style="font-family: sans-serif; color: #333;">
-        <h2 style="color: #D4AF37;">Welcome to Reclaim Africa</h2>
-        <p>Hi {user.full_name},</p>
-        <p>Thank you for creating an account with Reclaim Africa. We are here to help you recover what is yours.</p>
-        <p>Remember: We only get paid when you get paid.</p>
-        <p>If you have any questions, contact our founder at reclaimafrica.founder@gmail.com</p>
-        <br>
-        <p>Best regards,<br>The Reclaim Africa Team</p>
-    </body>
-    </html>
-    '''
-    await send_email(email_lower, 'Welcome to Reclaim Africa', html)
-    
     return UserResponse(
         id=user_id,
         email=email_lower,
@@ -350,25 +313,6 @@ async def create_claim(claim: ClaimCreate, request: Request):
     }
     result = await db.claims.insert_one(claim_doc)
     claim_id = str(result.inserted_id)
-    
-    # Send confirmation email
-    html = f'''
-    <html>
-    <body style="font-family: sans-serif; color: #333;">
-        <h2 style="color: #D4AF37;">Claim Submitted Successfully</h2>
-        <p>Hi {claim.full_name},</p>
-        <p>Thank you. Reclaim Africa has received your claim request.</p>
-        <p><strong>Asset Type:</strong> {claim.asset_type}</p>
-        <p><strong>Service Tier:</strong> {claim.service_tier}</p>
-        <p>Our team will review your case and contact you within 48 hours.</p>
-        <p>There is no upfront cost. We only get paid when you get paid.</p>
-        <p>Welcome to Reclaim Africa.</p>
-        <br>
-        <p>Best regards,<br>The Reclaim Africa Team</p>
-    </body>
-    </html>
-    '''
-    await send_email(claim.email, 'Your Claim Has Been Submitted', html)
     
     return ClaimResponse(
         id=claim_id,
@@ -473,23 +417,6 @@ async def update_claim_status(claim_id: str, update: ClaimStatusUpdate, request:
         {'_id': obj_id},
         {'$set': {'status': update.status, 'updated_at': datetime.now(timezone.utc)}}
     )
-    
-    # Send status update email
-    html = f'''
-    <html>
-    <body style="font-family: sans-serif; color: #333;">
-        <h2 style="color: #D4AF37;">Claim Status Updated</h2>
-        <p>Hi {claim['full_name']},</p>
-        <p>Your claim for <strong>{claim['asset_type']}</strong> has been updated.</p>
-        <p><strong>New Status:</strong> {update.status}</p>
-        <p>You can log in to your dashboard to view more details.</p>
-        <p>If you have any questions, contact us at reclaimafrica.founder@gmail.com</p>
-        <br>
-        <p>Best regards,<br>The Reclaim Africa Team</p>
-    </body>
-    </html>
-    '''
-    await send_email(claim['email'], 'Claim Status Update', html)
     
     return {'message': 'Claim status updated successfully', 'status': update.status}
 
