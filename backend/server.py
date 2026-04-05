@@ -392,12 +392,16 @@ async def create_claim(claim: ClaimCreate, request: Request):
 @api_router.get('/claims')
 async def get_user_claims(request: Request):
     user = await get_current_user(request)
-    claims = await db.claims.find({'user_id': user['_id']}, {'_id': 0}).to_list(1000)
-    for claim in claims:
+    claims_cursor = db.claims.find({'user_id': user['_id']})
+    claims = []
+    async for claim in claims_cursor:
+        claim['id'] = str(claim['_id'])
+        claim.pop('_id', None)
         if isinstance(claim.get('created_at'), datetime):
             claim['created_at'] = claim['created_at'].isoformat()
         if isinstance(claim.get('updated_at'), datetime):
             claim['updated_at'] = claim['updated_at'].isoformat()
+        claims.append(claim)
     return claims
 
 # ============ ADMIN ROUTES ============
@@ -408,47 +412,41 @@ async def get_all_claims(request: Request):
     if user.get('role') != 'admin':
         raise HTTPException(status_code=403, detail='Admin access required')
     
-    pipeline = [
-        {
-            '$lookup': {
-                'from': 'users',
-                'localField': 'user_id',
-                'foreignField': '_id',
-                'as': 'user_info'
-            }
-        },
-        {
-            '$unwind': '$user_info'
-        },
-        {
-            '$project': {
-                '_id': 0,
-                'id': {'$toString': '$_id'},
-                'user_id': {'$toString': '$user_id'},
-                'user_email': '$user_info.email',
-                'user_full_name': '$user_info.full_name',
-                'asset_type': 1,
-                'claiming_for': 1,
-                'documents': 1,
-                'full_name': 1,
-                'phone': 1,
-                'email': 1,
-                'state': 1,
-                'company_name': 1,
-                'estimated_shares': 1,
-                'estimated_value': 1,
-                'service_tier': 1,
-                'status': 1,
-                'created_at': 1,
-                'updated_at': 1
-            }
-        },
-        {
-            '$sort': {'created_at': -1}
-        }
-    ]
+    # Fetch all claims with user information
+    claims_cursor = db.claims.find({})
+    claims = []
     
-    claims = await db.claims.aggregate(pipeline).to_list(1000)
+    async for claim in claims_cursor:
+        user_id_str = claim.get('user_id')
+        claim_obj = {
+            'id': str(claim['_id']),
+            'user_id': user_id_str,
+            'asset_type': claim.get('asset_type'),
+            'claiming_for': claim.get('claiming_for'),
+            'documents': claim.get('documents', []),
+            'full_name': claim.get('full_name'),
+            'phone': claim.get('phone'),
+            'email': claim.get('email'),
+            'state': claim.get('state'),
+            'company_name': claim.get('company_name'),
+            'estimated_shares': claim.get('estimated_shares'),
+            'estimated_value': claim.get('estimated_value'),
+            'service_tier': claim.get('service_tier'),
+            'status': claim.get('status'),
+            'created_at': claim.get('created_at'),
+            'updated_at': claim.get('updated_at')
+        }
+        
+        if user_id_str:
+            user = await db.users.find_one({'_id': ObjectId(user_id_str)}, {'_id': 0, 'email': 1, 'full_name': 1})
+            if user:
+                claim_obj['user_email'] = user.get('email', '')
+                claim_obj['user_full_name'] = user.get('full_name', '')
+        
+        claims.append(claim_obj)
+    
+    # Sort by created_at
+    claims.sort(key=lambda x: x.get('created_at') or datetime.min, reverse=True)
     for claim in claims:
         if isinstance(claim.get('created_at'), datetime):
             claim['created_at'] = claim['created_at'].isoformat()

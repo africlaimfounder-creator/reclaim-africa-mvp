@@ -9,8 +9,13 @@ const Navigation = () => {
   const location = useLocation();
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/login');
+    try {
+      await logout();
+      navigate('/', { replace: true });
+    } catch (error) {
+      console.error('Logout error:', error);
+      navigate('/', { replace: true });
+    }
   };
 
   if (!user) return null;
