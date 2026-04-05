@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Home, FileText, HelpCircle, LogOut, Shield } from 'lucide-react';
+import NotificationBell from './NotificationBell';
 
 const Navigation = () => {
   const { user, logout } = useAuth();
@@ -88,6 +89,7 @@ const Navigation = () => {
                 <span className="hidden md:inline">Admin</span>
               </Link>
             )}
+            {user.role !== 'admin' && <NotificationBell />}
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 text-[#A3A099] hover:text-white transition-all duration-300"

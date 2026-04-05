@@ -84,6 +84,15 @@ class ClaimResponse(BaseModel):
 class ClaimStatusUpdate(BaseModel):
     status: str
 
+class NotificationResponse(BaseModel):
+    id: str
+    user_id: str
+    title: str
+    message: str
+    type: str
+    read: bool
+    created_at: str
+
 # ============ HELPER FUNCTIONS ============
 
 def hash_password(password: str) -> str:
@@ -134,12 +143,26 @@ async def get_current_user(request: Request) -> dict:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail='Invalid token')
 
+async def create_notification(user_id: str, title: str, message: str, notification_type: str = 'info'):
+    """Create a new notification for a user"""
+    notification = {
+        'user_id': user_id,
+        'title': title,
+        'message': message,
+        'type': notification_type,
+        'read': False,
+        'created_at': datetime.now(timezone.utc)
+    }
+    await db.notifications.insert_one(notification)
+    logger.info(f'Notification created for user {user_id}: {title}')
+
 # ============ STARTUP ============
 
 @app.on_event('startup')
 async def startup():
     await db.users.create_index('email', unique=True)
     await db.claims.create_index('user_id')
+    await db.notifications.create_index([('user_id', 1), ('created_at', -1)])
     await seed_admin()
 
 async def seed_admin():
@@ -223,6 +246,14 @@ async def register(user: UserRegister, response: Response):
         samesite='lax',
         max_age=604800,
         path='/'
+    )
+    
+    # Create welcome notification
+    await create_notification(
+        user_id=user_id,
+        title='Welcome to Reclaim Africa!',
+        message='Thank you for joining us. Start your first claim to recover your unclaimed assets. We only get paid when you get paid.',
+        notification_type='welcome'
     )
     
     return UserResponse(
@@ -313,6 +344,14 @@ async def create_claim(claim: ClaimCreate, request: Request):
     }
     result = await db.claims.insert_one(claim_doc)
     claim_id = str(result.inserted_id)
+    
+    # Create notification for claim submission
+    await create_notification(
+        user_id=user['_id'],
+        title='Claim Submitted Successfully',
+        message=f'Your claim for {claim.asset_type} has been submitted. Our team will review it within 48 hours.',
+        notification_type='claim_submitted'
+    )
     
     return ClaimResponse(
         id=claim_id,
@@ -418,7 +457,71 @@ async def update_claim_status(claim_id: str, update: ClaimStatusUpdate, request:
         {'$set': {'status': update.status, 'updated_at': datetime.now(timezone.utc)}}
     )
     
+    # Create notification for the user
+    await create_notification(
+        user_id=claim['user_id'],
+        title='Claim Status Updated',
+        message=f'Your claim for {claim["asset_type"]} has been updated to: {update.status}',
+        notification_type='claim_update'
+    )
+    
     return {'message': 'Claim status updated successfully', 'status': update.status}
+
+# ============ NOTIFICATION ROUTES ============
+
+@api_router.get('/notifications')
+async def get_notifications(request: Request):
+    """Get all notifications for the current user"""
+    user = await get_current_user(request)
+    notifications_cursor = db.notifications.find({'user_id': user['_id']}).sort('created_at', -1).limit(50)
+    notifications = []
+    async for notif in notifications_cursor:
+        notifications.append({
+            'id': str(notif['_id']),
+            'user_id': notif['user_id'],
+            'title': notif['title'],
+            'message': notif['message'],
+            'type': notif['type'],
+            'read': notif.get('read', False),
+            'created_at': notif['created_at'].isoformat()
+        })
+    return notifications
+
+@api_router.get('/notifications/unread-count')
+async def get_unread_count(request: Request):
+    """Get count of unread notifications"""
+    user = await get_current_user(request)
+    count = await db.notifications.count_documents({'user_id': user['_id'], 'read': False})
+    return {'count': count}
+
+@api_router.patch('/notifications/{notification_id}/read')
+async def mark_notification_read(notification_id: str, request: Request):
+    """Mark a notification as read"""
+    user = await get_current_user(request)
+    try:
+        obj_id = ObjectId(notification_id)
+    except:
+        raise HTTPException(status_code=400, detail='Invalid notification ID')
+    
+    result = await db.notifications.update_one(
+        {'_id': obj_id, 'user_id': user['_id']},
+        {'$set': {'read': True}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail='Notification not found')
+    
+    return {'message': 'Notification marked as read'}
+
+@api_router.post('/notifications/mark-all-read')
+async def mark_all_notifications_read(request: Request):
+    """Mark all notifications as read for the current user"""
+    user = await get_current_user(request)
+    await db.notifications.update_many(
+        {'user_id': user['_id'], 'read': False},
+        {'$set': {'read': True}}
+    )
+    return {'message': 'All notifications marked as read'}
 
 # ============ MAIN APP ============
 
