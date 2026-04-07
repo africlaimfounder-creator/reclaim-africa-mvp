@@ -1,77 +1,96 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import axios from 'axios';
 
 const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
-
-function formatApiErrorDetail(detail) {
-  if (detail == null) return 'Something went wrong. Please try again.';
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail))
-    return detail.map((e) => (e && typeof e.msg === 'string' ? e.msg : JSON.stringify(e))).filter(Boolean).join(' ');
-  if (detail && typeof detail.msg === 'string') return detail.msg;
-  return String(detail);
-}
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
-    try {
-      const { data } = await axios.get(`${API_URL}/api/auth/me`, { withCredentials: true });
-      setUser(data);
-    } catch (e) {
-      setUser(false);
-    } finally {
-      setLoading(false);
+    // Check for user in localStorage
+    const storedUser = localStorage.getItem('currentUser');
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
     }
-  };
+    setLoading(false);
+  }, []);
 
   const register = async (full_name, email, phone, password) => {
     try {
-      const { data } = await axios.post(
-        `${API_URL}/api/auth/register`,
-        { full_name, email, phone, password },
-        { withCredentials: true }
-      );
-      setUser(data);
+      // Get existing users
+      const users = JSON.parse(localStorage.getItem('users') || '[]');
+      
+      // Check if email already exists
+      if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+        return { success: false, error: 'Email already registered' };
+      }
+
+      // Create new user
+      const newUser = {
+        id: Date.now().toString(),
+        full_name,
+        email: email.toLowerCase(),
+        phone,
+        password, // In production, this should be hashed
+        role: 'user',
+        created_at: new Date().toISOString()
+      };
+
+      // Save to users list
+      users.push(newUser);
+      localStorage.setItem('users', JSON.stringify(users));
+
+      // Set as current user (without password)
+      const userWithoutPassword = { ...newUser };
+      delete userWithoutPassword.password;
+      setUser(userWithoutPassword);
+      localStorage.setItem('currentUser', JSON.stringify(userWithoutPassword));
+
+      // Create welcome notification
+      const notifications = JSON.parse(localStorage.getItem(`notifications_${newUser.id}`) || '[]');
+      notifications.unshift({
+        id: Date.now().toString(),
+        title: 'Welcome to Reclaim Africa!',
+        message: 'Thank you for joining us. Start your first claim to recover your unclaimed assets. We only get paid when you get paid.',
+        type: 'welcome',
+        read: false,
+        created_at: new Date().toISOString()
+      });
+      localStorage.setItem(`notifications_${newUser.id}`, JSON.stringify(notifications));
+
       return { success: true };
     } catch (e) {
-      const error = formatApiErrorDetail(e.response?.data?.detail) || e.message;
-      return { success: false, error };
+      return { success: false, error: e.message };
     }
   };
 
   const login = async (email, password) => {
     try {
-      const { data } = await axios.post(
-        `${API_URL}/api/auth/login`,
-        { email, password },
-        { withCredentials: true }
+      const users = JSON.parse(localStorage.getItem('users') || '[]');
+      const user = users.find(
+        u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
       );
-      setUser(data);
+
+      if (!user) {
+        return { success: false, error: 'Invalid email or password' };
+      }
+
+      const userWithoutPassword = { ...user };
+      delete userWithoutPassword.password;
+      setUser(userWithoutPassword);
+      localStorage.setItem('currentUser', JSON.stringify(userWithoutPassword));
+
       return { success: true };
     } catch (e) {
-      const error = formatApiErrorDetail(e.response?.data?.detail) || e.message;
-      return { success: false, error };
+      return { success: false, error: e.message };
     }
   };
 
   const logout = async () => {
-    try {
-      await axios.post(`${API_URL}/api/auth/logout`, {}, { withCredentials: true });
-      setUser(false);
-    } catch (e) {
-      console.error('Logout error:', e);
-    }
+    setUser(null);
+    localStorage.removeItem('currentUser');
   };
 
   return (

@@ -1,22 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import axios from 'axios';
-import { Bell, Check, X } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { useAuth } from '../contexts/AuthContext';
+import { Bell, Check } from 'lucide-react';
 
 const NotificationBell = () => {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
-    fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000); // Poll every 30 seconds
-    return () => clearInterval(interval);
-  }, []);
+    if (user) {
+      fetchNotifications();
+    }
+  }, [user]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -29,59 +27,27 @@ const NotificationBell = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const fetchUnreadCount = async () => {
-    try {
-      const { data } = await axios.get(`${API_URL}/api/notifications/unread-count`, {
-        withCredentials: true
-      });
-      setUnreadCount(data.count);
-    } catch (e) {
-      console.error('Error fetching unread count:', e);
-    }
+  const fetchNotifications = () => {
+    if (!user) return;
+    const userNotifs = JSON.parse(localStorage.getItem(`notifications_${user.id}`) || '[]');
+    setNotifications(userNotifs);
+    setUnreadCount(userNotifs.filter(n => !n.read).length);
   };
 
-  const fetchNotifications = async () => {
-    setLoading(true);
-    try {
-      const { data } = await axios.get(`${API_URL}/api/notifications`, {
-        withCredentials: true
-      });
-      setNotifications(data);
-    } catch (e) {
-      console.error('Error fetching notifications:', e);
-    } finally {
-      setLoading(false);
-    }
+  const markAsRead = (notificationId) => {
+    const updatedNotifs = notifications.map(n => 
+      n.id === notificationId ? { ...n, read: true } : n
+    );
+    setNotifications(updatedNotifs);
+    localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifs));
+    setUnreadCount(updatedNotifs.filter(n => !n.read).length);
   };
 
-  const markAsRead = async (notificationId) => {
-    try {
-      await axios.patch(
-        `${API_URL}/api/notifications/${notificationId}/read`,
-        {},
-        { withCredentials: true }
-      );
-      setNotifications(notifications.map(n => 
-        n.id === notificationId ? { ...n, read: true } : n
-      ));
-      setUnreadCount(Math.max(0, unreadCount - 1));
-    } catch (e) {
-      console.error('Error marking notification as read:', e);
-    }
-  };
-
-  const markAllAsRead = async () => {
-    try {
-      await axios.post(
-        `${API_URL}/api/notifications/mark-all-read`,
-        {},
-        { withCredentials: true }
-      );
-      setNotifications(notifications.map(n => ({ ...n, read: true })));
-      setUnreadCount(0);
-    } catch (e) {
-      console.error('Error marking all as read:', e);
-    }
+  const markAllAsRead = () => {
+    const updatedNotifs = notifications.map(n => ({ ...n, read: true }));
+    setNotifications(updatedNotifs);
+    localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifs));
+    setUnreadCount(0);
   };
 
   const toggleDropdown = () => {
@@ -155,9 +121,7 @@ const NotificationBell = () => {
           </div>
 
           <div className="overflow-y-auto" style={{ maxHeight: '400px' }}>
-            {loading ? (
-              <div className="p-8 text-center text-[#A3A099]">Loading...</div>
-            ) : notifications.length === 0 ? (
+            {notifications.length === 0 ? (
               <div className="p-8 text-center">
                 <Bell size={48} className="mx-auto mb-4" style={{ color: '#A3A099' }} />
                 <p className="text-[#A3A099]" style={{ fontFamily: 'Manrope, sans-serif' }}>
@@ -165,7 +129,7 @@ const NotificationBell = () => {
                 </p>
               </div>
             ) : (
-              notifications.map((notification) => (
+              notifications.slice(0, 5).map((notification) => (
                 <div
                   key={notification.id}
                   className={`p-4 border-b transition-all duration-300 hover:bg-[#1A1815] ${

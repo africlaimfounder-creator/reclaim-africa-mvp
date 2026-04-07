@@ -3,10 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Navigation from '../components/Navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useState } from 'react';
-import axios from 'axios';
 import { FileText } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const MyClaims = () => {
   const { user } = useAuth();
@@ -18,13 +15,10 @@ const MyClaims = () => {
     fetchClaims();
   }, []);
 
-  const fetchClaims = async () => {
-    try {
-      const { data } = await axios.get(`${API_URL}/api/claims`, { withCredentials: true });
-      setClaims(data);
-    } catch (e) {
-      console.error('Error fetching claims:', e);
-    } finally {
+  const fetchClaims = () => {
+    if (user) {
+      const userClaims = JSON.parse(localStorage.getItem(`claims_${user.id}`) || '[]');
+      setClaims(userClaims);
       setLoading(false);
     }
   };

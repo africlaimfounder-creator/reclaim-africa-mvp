@@ -2,10 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Navigation from '../components/Navigation';
-import axios from 'axios';
 import { ArrowLeft, ArrowRight, Check, Lock, AlertCircle } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const NIGERIAN_STATES = [
   'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno', 'Cross River',
@@ -143,11 +140,37 @@ const NewClaim = () => {
   const handleSubmit = async () => {
     setError('');
     setLoading(true);
+    
     try {
-      await axios.post(`${API_URL}/api/claims`, formData, { withCredentials: true });
+      // Create new claim
+      const newClaim = {
+        ...formData,
+        id: Date.now().toString(),
+        status: 'Submitted',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      // Save to localStorage
+      const userClaims = JSON.parse(localStorage.getItem(`claims_${user.id}`) || '[]');
+      userClaims.push(newClaim);
+      localStorage.setItem(`claims_${user.id}`, JSON.stringify(userClaims));
+
+      // Create notification
+      const notifications = JSON.parse(localStorage.getItem(`notifications_${user.id}`) || '[]');
+      notifications.unshift({
+        id: Date.now().toString(),
+        title: 'Claim Submitted Successfully',
+        message: `Your claim for ${formData.asset_type} has been submitted. Our team will review it within 48 hours.`,
+        type: 'claim_submitted',
+        read: false,
+        created_at: new Date().toISOString()
+      });
+      localStorage.setItem(`notifications_${user.id}`, JSON.stringify(notifications));
+
       setStep(6);
     } catch (e) {
-      setError(e.response?.data?.detail || 'Failed to submit claim. Please try again.');
+      setError('Failed to submit claim. Please try again.');
     } finally {
       setLoading(false);
     }

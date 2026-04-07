@@ -1,18 +1,21 @@
-# Reclaim Africa - Claim Submission Portal
+# Reclaim Africa - Standalone Frontend App
 
 Multi-step claim submission portal for Reclaim Africa, a Nigerian fintech helping people recover unclaimed financial assets.
+
+## ⚠️ Standalone Version
+
+This is a **frontend-only application** that runs entirely in the browser using localStorage for data persistence. No backend server required!
 
 ## Features
 
 - ✅ Multi-step claim form (5 steps with progress bar)
-- ✅ User authentication (JWT-based with httpOnly cookies)
-- ✅ Admin panel for claim management
-- ✅ In-app notifications system
-- ✅ Browser push notifications
-- ✅ Email notifications (Resend integration - removed)
+- ✅ User authentication (stored locally)
+- ✅ Claims management
+- ✅ In-app notifications
 - ✅ Professional UI with gold & black branding
 - ✅ Mobile-responsive design
 - ✅ Help Center with FAQs
+- ✅ All data stored in browser localStorage
 
 ## Tech Stack
 
@@ -21,156 +24,149 @@ Multi-step claim submission portal for Reclaim Africa, a Nigerian fintech helpin
 - React Router DOM
 - Tailwind CSS
 - Lucide React (icons)
-- Axios
+- localStorage for data persistence
 
-**Backend:**
-- Python 3.9+
-- FastAPI
-- MongoDB (Motor async driver)
-- PyJWT (authentication)
-- BCrypt (password hashing)
-- PyWebPush (push notifications)
+## Quick Start
 
-**Database:**
-- MongoDB
+### Install Dependencies
 
-## Project Structure
-
-```
-/app
-├── backend/
-│   ├── server.py           # Main FastAPI application
-│   ├── requirements.txt    # Python dependencies
-│   └── .env               # Environment variables
-├── frontend/
-│   ├── public/
-│   │   ├── reclaim-africa-logo.jpg
-│   │   └── service-worker.js
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Navigation.js
-│   │   │   ├── NotificationBell.js
-│   │   │   ├── ProtectedRoute.js
-│   │   │   └── PushNotificationPrompt.js
-│   │   ├── contexts/
-│   │   │   └── AuthContext.js
-│   │   ├── hooks/
-│   │   │   └── usePushNotifications.js
-│   │   ├── pages/
-│   │   │   ├── Landing.js
-│   │   │   ├── Signup.js
-│   │   │   ├── Login.js
-│   │   │   ├── Dashboard.js
-│   │   │   ├── NewClaim.js
-│   │   │   ├── MyClaims.js
-│   │   │   ├── Notifications.js
-│   │   │   ├── Help.js
-│   │   │   └── Admin.js
-│   │   ├── App.js
-│   │   ├── App.css
-│   │   └── index.css
-│   ├── package.json
-│   └── .env
-└── README.md
-```
-
-## Setup Instructions
-
-### Backend Setup
-
-1. Install Python dependencies:
-```bash
-cd backend
-pip install -r requirements.txt
-```
-
-2. Set up environment variables in `backend/.env`:
-```env
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=reclaim_africa
-JWT_SECRET=your_secret_key_here
-ADMIN_EMAIL=reclaimafrica.founder@gmail.com
-ADMIN_PASSWORD=Founder12344
-FRONTEND_URL=http://localhost:3000
-```
-
-3. Run the backend:
-```bash
-uvicorn server:app --host 0.0.0.0 --port 8001 --reload
-```
-
-### Frontend Setup
-
-1. Install dependencies:
 ```bash
 cd frontend
 yarn install
 ```
 
-2. Set up environment variables in `frontend/.env`:
-```env
-REACT_APP_BACKEND_URL=http://localhost:8001
-```
+### Run the App
 
-3. Run the frontend:
 ```bash
 yarn start
 ```
 
-The app will be available at `http://localhost:3000`
+The app will open at `http://localhost:3000`
 
-## Admin Credentials
+## Default Login Credentials
 
-- **Email**: reclaimafrica.founder@gmail.com
-- **Password**: Founder12344
+**Admin Account:**
+- Email: `reclaimafrica.founder@gmail.com`
+- Password: `Founder12344`
 
-## API Endpoints
+Or create a new account from the signup page!
 
-### Authentication
-- `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - Login user
-- `GET /api/auth/me` - Get current user
-- `POST /api/auth/logout` - Logout user
+## Project Structure
 
-### Claims
-- `POST /api/claims` - Submit new claim
-- `GET /api/claims` - Get user's claims
+```
+frontend/
+├── public/
+│   ├── reclaim-africa-logo.jpg
+│   └── service-worker.js
+├── src/
+│   ├── components/
+│   │   ├── Navigation.js
+│   │   ├── NotificationBell.js
+│   │   ├── ProtectedRoute.js
+│   │   └── PushNotificationPrompt.js
+│   ├── contexts/
+│   │   └── AuthContext.js
+│   ├── pages/
+│   │   ├── Landing.js
+│   │   ├── Signup.js
+│   │   ├── Login.js
+│   │   ├── Dashboard.js
+│   │   ├── NewClaim.js
+│   │   ├── MyClaims.js
+│   │   ├── Notifications.js
+│   │   └── Help.js
+│   ├── utils/
+│   │   └── seedAdmin.js
+│   ├── App.js
+│   ├── App.css
+│   └── index.css
+└── package.json
+```
 
-### Admin
-- `GET /api/admin/claims` - Get all claims (admin only)
-- `PATCH /api/admin/claims/{id}/status` - Update claim status (admin only)
+## How It Works
 
-### Notifications
-- `GET /api/notifications` - Get user notifications
-- `GET /api/notifications/unread-count` - Get unread count
-- `PATCH /api/notifications/{id}/read` - Mark as read
-- `POST /api/notifications/mark-all-read` - Mark all as read
+### Data Storage
 
-### Push Notifications
-- `GET /api/push/vapid-public-key` - Get VAPID public key
-- `POST /api/push/subscribe` - Subscribe to push
-- `POST /api/push/unsubscribe` - Unsubscribe from push
+All data is stored in browser localStorage:
+- **Users**: `localStorage.users` - Array of all registered users
+- **Current User**: `localStorage.currentUser` - Currently logged-in user
+- **Claims**: `localStorage.claims_{userId}` - Claims for each user
+- **Notifications**: `localStorage.notifications_{userId}` - Notifications for each user
 
-## Deployment
+### Features
 
-### Prerequisites
-- MongoDB instance (MongoDB Atlas recommended)
-- Node.js 16+ and Python 3.9+
-- Domain name (optional)
+1. **User Registration & Login**
+   - Create account with full name, email, phone, password
+   - Login with email/password
+   - Auto-seeded admin account
 
-### Environment Variables
-Update the `.env` files with production values before deploying.
+2. **Multi-Step Claim Form**
+   - Step 1: Asset type selection (12 types)
+   - Step 2: Who is claiming
+   - Step 3: Documents available
+   - Step 4: Personal details
+   - Step 5: Service tier selection
+   - Step 6: Confirmation
 
-## Features Implemented
+3. **Claims Management**
+   - View all submitted claims
+   - Track claim status (Submitted, Under Review, Completed)
+   - Filter and search
 
-1. **User Registration & Login** - Secure JWT authentication
-2. **Multi-Step Claim Form** - 5 steps with validation
-3. **Admin Panel** - View and manage all claims
-4. **Claim Status Updates** - Admin can update status (Submitted → Under Review → Completed)
-5. **In-App Notifications** - Real-time notification system
-6. **Push Notifications** - Browser push when claim status changes
-7. **Help Center** - Comprehensive FAQs
-8. **Professional Branding** - Custom logo and color scheme
+4. **Notifications**
+   - Welcome notification on signup
+   - Claim submission confirmation
+   - Real-time notification bell
+   - View all notifications page
+
+5. **Help Center**
+   - Comprehensive FAQs
+   - Contact information
+
+## Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/africlaimfounder-creator/reclaim-africa-mvp)
+
+### Manual Deployment
+
+1. Push to GitHub
+2. Go to [vercel.com](https://vercel.com)
+3. Import your repository
+4. Set root directory to `frontend`
+5. Deploy!
+
+**No environment variables needed** - it's all frontend!
+
+## Browser Compatibility
+
+- ✅ Chrome/Edge (recommended)
+- ✅ Firefox
+- ✅ Safari
+- ✅ Mobile browsers
+
+## Data Persistence
+
+Data persists as long as you don't:
+- Clear browser data/cache
+- Use incognito/private mode
+- Delete localStorage manually
+
+**Tip**: Export your data regularly by copying localStorage in browser dev tools!
+
+## Development
+
+```bash
+# Install dependencies
+yarn install
+
+# Start development server
+yarn start
+
+# Build for production
+yarn build
+
+# The build folder is ready to deploy
+```
 
 ## License
 

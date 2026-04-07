@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Home, FileText, HelpCircle, LogOut, Shield } from 'lucide-react';
+import { Home, FileText, HelpCircle, LogOut } from 'lucide-react';
 import NotificationBell from './NotificationBell';
 
 const Navigation = () => {
@@ -74,19 +74,7 @@ const Navigation = () => {
               <HelpCircle size={18} />
               <span className="hidden md:inline">Help</span>
             </Link>
-            {user.role === 'admin' && (
-              <Link
-                to="/admin"
-                className={`flex items-center gap-2 transition-all duration-300 ${
-                  isActive('/admin') ? 'text-[#D4AF37]' : 'text-[#A3A099] hover:text-white'
-                }`}
-                data-testid="nav-admin"
-              >
-                <Shield size={18} />
-                <span className="hidden md:inline">Admin</span>
-              </Link>
-            )}
-            {user.role !== 'admin' && <NotificationBell />}
+            <NotificationBell />
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 text-[#A3A099] hover:text-white transition-all duration-300"

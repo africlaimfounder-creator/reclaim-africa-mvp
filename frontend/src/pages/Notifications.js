@@ -1,59 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import Navigation from '../components/Navigation';
-import axios from 'axios';
-import { Bell, Check, CheckCheck, Filter } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { useAuth } from '../contexts/AuthContext';
+import { Bell, Check, CheckCheck } from 'lucide-react';
 
 const Notifications = () => {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // all, unread, read
 
   useEffect(() => {
     fetchNotifications();
-  }, []);
+  }, [user]);
 
-  const fetchNotifications = async () => {
-    setLoading(true);
-    try {
-      const { data } = await axios.get(`${API_URL}/api/notifications`, {
-        withCredentials: true
-      });
-      setNotifications(data);
-    } catch (e) {
-      console.error('Error fetching notifications:', e);
-    } finally {
-      setLoading(false);
-    }
+  const fetchNotifications = () => {
+    if (!user) return;
+    const userNotifs = JSON.parse(localStorage.getItem(`notifications_${user.id}`) || '[]');
+    setNotifications(userNotifs);
+    setLoading(false);
   };
 
-  const markAsRead = async (notificationId) => {
-    try {
-      await axios.patch(
-        `${API_URL}/api/notifications/${notificationId}/read`,
-        {},
-        { withCredentials: true }
-      );
-      setNotifications(notifications.map(n =>
-        n.id === notificationId ? { ...n, read: true } : n
-      ));
-    } catch (e) {
-      console.error('Error marking notification as read:', e);
-    }
+  const markAsRead = (notificationId) => {
+    const updatedNotifs = notifications.map(n =>
+      n.id === notificationId ? { ...n, read: true } : n
+    );
+    setNotifications(updatedNotifs);
+    localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifs));
   };
 
-  const markAllAsRead = async () => {
-    try {
-      await axios.post(
-        `${API_URL}/api/notifications/mark-all-read`,
-        {},
-        { withCredentials: true }
-      );
-      setNotifications(notifications.map(n => ({ ...n, read: true })));
-    } catch (e) {
-      console.error('Error marking all as read:', e);
-    }
+  const markAllAsRead = () => {
+    const updatedNotifs = notifications.map(n => ({ ...n, read: true }));
+    setNotifications(updatedNotifs);
+    localStorage.setItem(`notifications_${user.id}`, JSON.stringify(updatedNotifs));
   };
 
   const getTimeAgo = (dateString) => {

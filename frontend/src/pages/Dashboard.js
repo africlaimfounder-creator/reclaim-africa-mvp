@@ -3,31 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Navigation from '../components/Navigation';
 import PushNotificationPrompt from '../components/PushNotificationPrompt';
-import axios from 'axios';
 import { Plus, FileText, Clock, CheckCircle, AlertCircle } from 'lucide-react';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const Dashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [claims, setClaims] = useState([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchClaims();
-  }, []);
-
-  const fetchClaims = async () => {
-    try {
-      const { data } = await axios.get(`${API_URL}/api/claims`, { withCredentials: true });
-      setClaims(data);
-    } catch (e) {
-      console.error('Error fetching claims:', e);
-    } finally {
-      setLoading(false);
+    if (user) {
+      const userClaims = JSON.parse(localStorage.getItem(`claims_${user.id}`) || '[]');
+      setClaims(userClaims);
     }
-  };
+  }, [user]);
 
   const getStatusIcon = (status) => {
     switch (status) {
@@ -96,9 +84,7 @@ const Dashboard = () => {
             My Claims
           </h2>
 
-          {loading ? (
-            <div className="text-[#A3A099] text-center py-12">Loading claims...</div>
-          ) : claims.length === 0 ? (
+          {claims.length === 0 ? (
             <div
               className="rounded-2xl p-12 border text-center"
               style={{ backgroundColor: '#12100E', borderColor: '#2B2823' }}

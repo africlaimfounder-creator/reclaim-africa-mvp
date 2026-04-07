@@ -8,10 +8,10 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import NewClaim from './pages/NewClaim';
 import Help from './pages/Help';
-import Admin from './pages/Admin';
 import MyClaims from './pages/MyClaims';
 import Notifications from './pages/Notifications';
 import './App.css';
+import './utils/seedAdmin';
 
 function App() {
   return (
@@ -58,14 +58,6 @@ function App() {
             element={
               <ProtectedRoute>
                 <Notifications />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin"
-            element={
-              <ProtectedRoute adminOnly>
-                <Admin />
               </ProtectedRoute>
             }
           />
